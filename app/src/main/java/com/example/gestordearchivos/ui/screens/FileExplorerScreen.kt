@@ -1,9 +1,12 @@
 package com.example.gestordearchivos.ui.screens
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+// AGREGADO: Import para el ícono de flecha
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
@@ -16,7 +19,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.fileexplorer.viewmodel.FileViewModel
+// CORRECCIÓN: La importación apuntaba a un paquete incorrecto
+import com.example.gestordearchivos.viewmodel.FileViewModel
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -45,9 +49,17 @@ fun FileExplorerScreen(
                     // Aquí irían los "Breadcrumbs"
                     Text(text = currentPath, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 },
-                // Botón para ir atrás (implementar lógica en ViewModel)
+                // AGREGADO: Botón para ir atrás (Navegar Arriba)
                 navigationIcon = {
-                    // IconButton(onClick = { fileViewModel.navigateUp() }) { ... }
+                    // Habilitar solo si no estamos en la raíz
+                    if (currentPath != fileViewModel.initialPath) {
+                        IconButton(onClick = { fileViewModel.navigateUp() }) {
+                            Icon(
+                                imageVector = Icons.Default.ArrowBack,
+                                contentDescription = "Navegar hacia arriba"
+                            )
+                        }
+                    }
                 }
             )
         }
@@ -91,7 +103,13 @@ fun FileListItem(
     onShowOptions: () -> Unit
 ) {
     val icon = if (file.isDirectory) Icons.Default.Folder else Icons.Default.Description
-    val metadata = "${formatFileSize(file.length())} | ${dateFormatter.format(Date(file.lastModified()))}"
+    // Evita crash si el archivo es inaccesible (length=0) y previene división por cero en formatFileSize
+    val metadata = if (file.canRead()) {
+        "${formatFileSize(file.length())} | ${dateFormatter.format(Date(file.lastModified()))}"
+    } else {
+        "No accesible | ${dateFormatter.format(Date(file.lastModified()))}"
+    }
+
 
     ListItem(
         headlineContent = { Text(file.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -115,6 +133,9 @@ fun FileListItem(
 private fun formatFileSize(size: Long): String {
     if (size <= 0) return "0 B"
     val units = arrayOf("B", "KB", "MB", "GB", "TB")
+    // Previene un error de Math.log10(0)
     val digitGroups = (Math.log10(size.toDouble()) / Math.log10(1024.0)).toInt()
-    return String.format(Locale.getDefault(), "%.1f %s", size / Math.pow(1024.0, digitGroups.toDouble()), units[digitGroups])
+    // Asegura que digitGroups no esté fuera de los límites del array
+    val aDigitGroups = if (digitGroups > units.size - 1) units.size - 1 else digitGroups
+    return String.format(Locale.getDefault(), "%.1f %s", size / Math.pow(1024.0, aDigitGroups.toDouble()), units[aDigitGroups])
 }

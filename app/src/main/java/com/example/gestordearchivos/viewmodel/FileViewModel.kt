@@ -4,10 +4,10 @@ import android.app.Application
 import android.content.Context
 import android.os.Environment
 import androidx.lifecycle.AndroidViewModel
-import androidxs.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
+import com.example.gestordearchivos.util.PermissionManager // ¡IMPORTAR!
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -25,20 +25,39 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
     private val _filesList = MutableLiveData<List<File>>(emptyList())
     val filesList: LiveData<List<File>> = _filesList
 
-    // TODO: Manejar el estado de los permisos
-    private val _permissionsGranted = MutableLiveData<Boolean>(false)
+    // Actualizamos el LiveData con el estado real del permiso
+    private val _permissionsGranted = MutableLiveData<Boolean>(
+        PermissionManager.isStoragePermissionGranted(application)
+    )
     val permissionsGranted: LiveData<Boolean> = _permissionsGranted
+
+    /**
+     * Actualiza el estado del permiso. Debería llamarse desde la UI
+     * cuando el permiso cambie (ej. al volver de settings).
+     */
+    fun updatePermissionStatus() {
+        val isGranted = PermissionManager.isStoragePermissionGranted(getApplication())
+        _permissionsGranted.value = isGranted
+
+        // Si el permiso acaba de ser concedido, carga el directorio raíz
+        if (isGranted && _filesList.value.isNullOrEmpty()) {
+            loadDirectory(initialPath)
+        }
+    }
 
     /**
      * Carga el contenido de un directorio.
      * Esta operación debe realizarse en un hilo de IO.
      */
     fun loadDirectory(path: String) {
-        // TODO: Comprobar los permisos antes de intentar leer
-        // if (!permissionsGranted.value!!) {
-        //     // Pedir permisos
-        //     return
-        // }
+        // Comprobar el permiso antes de intentar leer
+        if (_permissionsGranted.value != true) {
+            // Si el ViewModel se entera de que no hay permiso,
+            // no intenta leer y limpia la lista.
+            _filesList.value = emptyList()
+            // Podríamos postear un error aquí
+            return
+        }
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -64,7 +83,9 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
                     _filesList.value = emptyList()
-                    // TODO: Mostrar un error al usuario (p.ej. con un Snackbar)
+                    // Si perdemos el permiso mientras la app está abierta,
+                    // actualizamos el estado.
+                    _permissionsGranted.value = false
                 }
             } catch (e: Exception) {
                 // Otro tipo de error
@@ -100,6 +121,8 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
     // --- Funciones de operaciones de archivo (Conceptuales) ---
 
     fun deleteFile(file: File) {
+        if (_permissionsGranted.value != true) return // Comprobación de permiso
+
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 // TODO: Implementar validación y diálogo de confirmación
