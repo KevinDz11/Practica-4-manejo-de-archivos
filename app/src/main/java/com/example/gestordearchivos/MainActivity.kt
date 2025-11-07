@@ -11,19 +11,25 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
-import com.example.gestordearchivos.ui.theme.GestorDeArchivosTheme
+import com.example.gestordearchivos.ui.screens.FileExplorerScreen
+import com.example.gestordearchivos.ui.theme.FileExplorerTheme // Importa tu tema personalizado
+import com.example.gestordearchivos.ui.theme.AppThemeType
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            GestorDeArchivosTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Greeting(
-                        name = "Android",
-                        modifier = Modifier.padding(innerPadding)
-                    )
+            // Aquí seleccionas el tema. ¡Puedes hacerlo dinámico más tarde!
+            FileExplorerTheme(
+                theme = AppThemeType.GUINDA // O AppThemeType.AZUL
+            ) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    // ¡Aquí llamas a tu pantalla principal!
+                    FileExplorerScreen()
                 }
             }
         }
