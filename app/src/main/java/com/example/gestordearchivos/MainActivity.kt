@@ -21,16 +21,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import com.example.gestordearchivos.ui.AppNavigationHost
 import com.example.gestordearchivos.ui.screens.FileExplorerScreen
-import com.example.gestordearchivos.ui.screens.RequestPermissionScreen // ¡IMPORTAR!
+import com.example.gestordearchivos.ui.screens.RequestPermissionScreen
 import com.example.gestordearchivos.ui.theme.FileExplorerTheme
 import com.example.gestordearchivos.ui.theme.AppThemeType
-import com.example.gestordearchivos.util.PermissionManager // ¡IMPORTAR!
+import com.example.gestordearchivos.util.PermissionManager
+import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.gestordearchivos.viewmodel.ThemeViewModel
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
+            val themeViewModel: ThemeViewModel = viewModel()
+            val currentTheme by themeViewModel.theme.collectAsState()
+
             var hasPermission by rememberSaveable { mutableStateOf(false) }
             val context = LocalContext.current
 
@@ -46,7 +52,7 @@ class MainActivity : ComponentActivity() {
             }
 
             FileExplorerTheme(
-                theme = AppThemeType.GUINDA
+                theme = currentTheme
             ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),

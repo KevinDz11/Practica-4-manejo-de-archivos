@@ -8,6 +8,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.gestordearchivos.ui.screens.FileExplorerScreen
 import com.example.gestordearchivos.ui.screens.ImageViewerScreen
+import com.example.gestordearchivos.ui.screens.SettingsScreen
 import com.example.gestordearchivos.ui.screens.TextViewerScreen
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
@@ -17,6 +18,7 @@ object AppRoutes {
     const val FILE_EXPLORER = "file_explorer"
     const val TEXT_VIEWER = "text_viewer"
     const val IMAGE_VIEWER = "image_viewer"
+    const val SETTINGS = "settings" // Nueva ruta
 }
 
 @Composable
@@ -59,6 +61,13 @@ fun AppNavigationHost() {
 
             ImageViewerScreen(
                 filePath = filePath,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        // --- Ruta: Ajustes ---
+        composable(AppRoutes.SETTINGS) {
+            SettingsScreen(
                 onNavigateBack = { navController.popBackStack() }
             )
         }
