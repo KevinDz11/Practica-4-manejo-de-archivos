@@ -4,14 +4,14 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import android.widget.Toast
-import androidx.core.content.FileProvider
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-// AGREGADO: Import para el ícono de flecha
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
@@ -25,19 +25,41 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavController
+import com.example.gestordearchivos.ui.AppRoutes
+import com.example.gestordearchivos.ui.components.FileBreadcrumbs
 import com.example.gestordearchivos.ui.components.FileOptionsDialog
 import com.example.gestordearchivos.ui.components.RenameFileDialog
-import com.example.gestordearchivos.viewmodel.FileViewModel
 import com.example.gestordearchivos.util.MimeTypeHelper
+import com.example.gestordearchivos.viewmodel.FileViewModel
 import java.io.File
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
 import java.util.*
 
+// Formateador de fecha para los metadatos
 private val dateFormatter = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
 
-// Función para abrir el archivo
-private fun openFile(context: Context, file: File) {
+// --- FUNCIONES HELPER PARA TIPOS DE ARCHIVO ---
+private fun isTextFile(file: File): Boolean {
+    val extension = file.extension.lowercase(Locale.getDefault())
+    // JSON y XML también son texto
+    return extension in listOf("txt", "md", "log", "json", "xml", "kt", "java", "py")
+}
+
+private fun isImageFile(file: File): Boolean {
+    val extension = file.extension.lowercase(Locale.getDefault())
+    return extension in listOf("jpg", "jpeg", "png", "bmp", "webp", "gif")
+}
+
+/**
+ * Abre un archivo usando un Intent ACTION_VIEW.
+ * Este es el fallback para tipos de archivo que la app no abre nativamente.
+ */
+private fun openFileWithIntent(context: Context, file: File) {
     try {
         // 1. Obtener la autoridad del FileProvider (debe coincidir con el Manifest)
         val authority = "${context.packageName}.provider"
@@ -67,28 +89,36 @@ private fun openFile(context: Context, file: File) {
     }
 }
 
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FileExplorerScreen(
+    navController: NavController, // Controlador para navegar a otros visores
     fileViewModel: FileViewModel = viewModel()
 ) {
-    // ... (estados de currentPath, filesList, context sin cambios) ...
+    // Observamos los estados del ViewModel
     val currentPath by fileViewModel.currentPath.observeAsState(fileViewModel.initialPath)
     val filesList by fileViewModel.filesList.observeAsState(emptyList())
+    val clipboardData by fileViewModel.clipboard.observeAsState(null)
     val context = LocalContext.current
 
     // --- ESTADOS PARA LOS DIÁLOGOS ---
+    // 1. Estado para saber qué archivo seleccionamos
     var selectedFile by remember { mutableStateOf<File?>(null) }
+
+    // 2. Estado para mostrar/ocultar el BottomSheet de opciones
     var showOptionsSheet by rememberSaveable { mutableStateOf(false) }
+
+    // 3. Estado para mostrar/ocultar el diálogo de confirmación de borrado
     var showDeleteConfirmDialog by rememberSaveable { mutableStateOf(false) }
 
-    // AGREGADO: Estado para el diálogo de renombrar
+    // 4. Estado para el diálogo de renombrar
     var showRenameDialog by rememberSaveable { mutableStateOf(false) }
 
 
     // --- LÓGICA DE LOS DIÁLOGOS ---
 
-    // 1. BottomSheet de Opciones
+    // 1. Si el estado `showOptionsSheet` es verdadero, mostramos el BottomSheet
     if (showOptionsSheet) {
         if (selectedFile != null) {
             FileOptionsDialog(
@@ -98,24 +128,32 @@ fun FileExplorerScreen(
                     fileViewModel.shareFile(context, file)
                     // onDismiss se llama dentro del dialog
                 },
-                onDeleteClick = { file ->
+                onDeleteClick = {
+                    // En lugar de borrar directo, mostramos el diálogo de confirmación
                     showDeleteConfirmDialog = true
                     // onDismiss se llama dentro del dialog
                 },
                 onRenameClick = {
-                    // ¡ACCIÓN! Al hacer clic en renombrar:
-                    // 1. Ocultamos el bottom sheet (se hace con onDismiss)
-                    // 2. Mostramos el diálogo de renombrar
+                    // Mostramos el diálogo de renombrar
                     showRenameDialog = true
+                    // onDismiss se llama dentro del dialog
+                },
+                onCopyClick = { file ->
+                    fileViewModel.copyFileToClipboard(file)
+                    // onDismiss se llama dentro del dialog
+                },
+                onMoveClick = { file ->
+                    fileViewModel.moveFileToClipboard(file)
                     // onDismiss se llama dentro del dialog
                 }
             )
         } else {
+            // Si el archivo es nulo (no debería pasar), ocultamos la hoja
             showOptionsSheet = false
         }
     }
 
-    // 2. Diálogo de Confirmar Borrado
+    // 2. Si el estado `showDeleteConfirmDialog` es verdadero, mostramos el diálogo de alerta
     if (showDeleteConfirmDialog) {
         if (selectedFile != null) {
             DeleteConfirmationDialog(
@@ -124,15 +162,16 @@ fun FileExplorerScreen(
                 onConfirm = {
                     fileViewModel.deleteFile(selectedFile!!)
                     showDeleteConfirmDialog = false
-                    selectedFile = null
+                    selectedFile = null // Limpiar selección
                 }
             )
         } else {
+            // Si el archivo es nulo, ocultamos
             showDeleteConfirmDialog = false
         }
     }
 
-    // 3. AGREGADO: Diálogo de Renombrar
+    // 3. Diálogo de Renombrar
     if (showRenameDialog) {
         if (selectedFile != null) {
             RenameFileDialog(
@@ -153,6 +192,7 @@ fun FileExplorerScreen(
     }
 
     // --- UI PRINCIPAL (Scaffold) ---
+    // Efecto para cargar el directorio inicial (o cuando el permiso esté listo)
     LaunchedEffect(Unit) {
         fileViewModel.loadDirectory(currentPath)
     }
@@ -161,8 +201,17 @@ fun FileExplorerScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(text = currentPath, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    // Reemplazamos el Text simple con los Breadcrumbs interactivos
+                    FileBreadcrumbs(
+                        currentPath = currentPath,
+                        rootPath = fileViewModel.initialPath,
+                        onPathClick = { path ->
+                            // Al hacer clic en un segmento, cargamos ese directorio
+                            fileViewModel.loadDirectory(path)
+                        }
+                    )
                 },
+                // Botón para ir atrás
                 navigationIcon = {
                     if (currentPath != fileViewModel.initialPath) {
                         IconButton(onClick = { fileViewModel.navigateUp() }) {
@@ -172,12 +221,27 @@ fun FileExplorerScreen(
                             )
                         }
                     }
+                },
+                // Acciones de la barra superior (Pegar / Cancelar)
+                actions = {
+                    // Si hay algo en el portapapeles, mostrar botones
+                    if (clipboardData != null) {
+                        // Botón de Pegar
+                        IconButton(onClick = { fileViewModel.pasteFile() }) {
+                            Icon(Icons.Default.ContentPaste, "Pegar")
+                        }
+                        // Botón de Cancelar Pegado
+                        IconButton(onClick = { fileViewModel.clearClipboard() }) {
+                            Icon(Icons.Default.Cancel, "Cancelar")
+                        }
+                    }
                 }
             )
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding)) {
             if (filesList.isEmpty()) {
+                // Muestra un indicador de carga o de carpeta vacía
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("Carpeta vacía o cargando...")
                 }
@@ -189,10 +253,25 @@ fun FileExplorerScreen(
                         FileListItem(
                             file = file,
                             onFileClick = {
+                                // --- LÓGICA DE CLIC ACTUALIZADA ---
                                 if (file.isDirectory) {
                                     fileViewModel.loadDirectory(file.path)
                                 } else {
-                                    openFile(context, file)
+                                    // URL-encode del path para que sea seguro pasarlo como argumento
+                                    val encodedPath = URLEncoder.encode(file.path, StandardCharsets.UTF_8.toString())
+
+                                    when {
+                                        isTextFile(file) -> {
+                                            navController.navigate("${AppRoutes.TEXT_VIEWER}?path=$encodedPath")
+                                        }
+                                        isImageFile(file) -> {
+                                            navController.navigate("${AppRoutes.IMAGE_VIEWER}?path=$encodedPath")
+                                        }
+                                        else -> {
+                                            // Fallback para otros tipos de archivo
+                                            openFileWithIntent(context, file)
+                                        }
+                                    }
                                 }
                             },
                             onShowOptions = {
@@ -255,7 +334,6 @@ private fun formatFileSize(size: Long): String {
 }
 
 // --- DIÁLOGO DE CONFIRMACIÓN DE BORRADO ---
-// (Lo añadimos al final de este mismo archivo, por simplicidad)
 @Composable
 private fun DeleteConfirmationDialog(
     file: File,

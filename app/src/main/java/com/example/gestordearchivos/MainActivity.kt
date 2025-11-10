@@ -19,6 +19,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
+import com.example.gestordearchivos.ui.AppNavigationHost
 import com.example.gestordearchivos.ui.screens.FileExplorerScreen
 import com.example.gestordearchivos.ui.screens.RequestPermissionScreen // ¡IMPORTAR!
 import com.example.gestordearchivos.ui.theme.FileExplorerTheme
@@ -30,42 +31,35 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            // Estado para rastrear si el permiso está concedido
-            // Usamos rememberSaveable para que sobreviva a rotaciones
             var hasPermission by rememberSaveable { mutableStateOf(false) }
             val context = LocalContext.current
 
-            // Lanzador para el resultado de la pantalla de configuración de permisos
             val permissionLauncher = rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.StartActivityForResult(),
                 onResult = {
-                    // Cuando el usuario regresa de la configuración,
-                    // volvemos a comprobar el permiso.
                     hasPermission = PermissionManager.isStoragePermissionGranted(context)
                 }
             )
 
-            // Comprobar el permiso al iniciar la app
-            // LaunchedEffect se ejecuta una sola vez (gracias a 'Unit')
             LaunchedEffect(Unit) {
                 hasPermission = PermissionManager.isStoragePermissionGranted(context)
             }
 
             FileExplorerTheme(
-                theme = AppThemeType.GUINDA // O AppThemeType.AZUL
+                theme = AppThemeType.GUINDA
             ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
                     if (hasPermission) {
-                        // Si tenemos permiso, mostramos el explorador
-                        FileExplorerScreen()
+                        // ¡CAMBIO! Ya no llamamos a FileExplorerScreen aquí.
+                        // Llamamos al navegador principal.
+                        AppNavigationHost()
                     } else {
-                        // Si no, mostramos la pantalla de solicitud
+                        // Esto se queda igual
                         RequestPermissionScreen(
                             onGrantPermissionClick = {
-                                // Lanzamos el intent para ir a configuración
                                 val intent = PermissionManager.getStoragePermissionIntent(context)
                                 permissionLauncher.launch(intent)
                             }

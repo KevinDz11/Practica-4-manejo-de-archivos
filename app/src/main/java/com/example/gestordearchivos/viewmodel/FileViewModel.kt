@@ -12,12 +12,12 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import com.example.gestordearchivos.util.MimeTypeHelper
-import com.example.gestordearchivos.util.PermissionManager // ¡IMPORTAR!
+import com.example.gestordearchivos.util.PermissionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.security.Permission
+import java.io.IOException
 
 class FileViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -35,6 +35,11 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
         PermissionManager.isStoragePermissionGranted(application)
     )
     val permissionsGranted: LiveData<Boolean> = _permissionsGranted
+
+    // --- PORTAPAPELES ---
+    private val _clipboard = MutableLiveData<Pair<File, ClipboardAction>?>(null)
+    val clipboard: LiveData<Pair<File, ClipboardAction>?> = _clipboard
+    // --- FIN PORTAPAPELES ---
 
     /**
      * Actualiza el estado del permiso. Debería llamarse desde la UI
@@ -57,10 +62,7 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
     fun loadDirectory(path: String) {
         // Comprobar el permiso antes de intentar leer
         if (_permissionsGranted.value != true) {
-            // Si el ViewModel se entera de que no hay permiso,
-            // no intenta leer y limpia la lista.
             _filesList.value = emptyList()
-            // Podríamos postear un error aquí
             return
         }
 
@@ -109,22 +111,104 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // --- Funciones de almacenamiento persistente (Conceptuales) ---
+    // --- Funciones de Portapapeles ---
+
+    /**
+     * Añade un archivo al portapapeles para COPIAR.
+     */
+    fun copyFileToClipboard(file: File) {
+        _clipboard.value = Pair(file, ClipboardAction.COPY)
+        Toast.makeText(getApplication(), "Listo para pegar", Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * Añade un archivo al portapapeles para MOVER (Cortar).
+     */
+    fun moveFileToClipboard(file: File) {
+        _clipboard.value = Pair(file, ClipboardAction.MOVE)
+        Toast.makeText(getApplication(), "Listo para pegar (Mover)", Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * Limpia el portapapeles.
+     */
+    fun clearClipboard() {
+        _clipboard.value = null
+    }
+
+    /**
+     * Pega el archivo del portapapeles en el directorio actual.
+     */
+    fun pasteFile() {
+        val clipboardData = _clipboard.value ?: return
+        val (fileToPaste, action) = clipboardData
+        val destinationPath = _currentPath.value ?: initialPath
+        val destinationDir = File(destinationPath)
+
+        if (!destinationDir.canWrite()) {
+            Toast.makeText(getApplication(), "Error: No se puede escribir en este directorio", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val newFile = File(destinationDir, fileToPaste.name)
+
+                if (newFile.exists()) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(getApplication(), "El archivo ya existe en este directorio", Toast.LENGTH_SHORT).show()
+                    }
+                    return@launch
+                }
+
+                val success: Boolean = when (action) {
+                    ClipboardAction.COPY -> {
+                        // Copia recursiva (para carpetas)
+                        fileToPaste.copyRecursively(newFile)
+                    }
+                    ClipboardAction.MOVE -> {
+                        // Mueve el archivo
+                        fileToPaste.renameTo(newFile)
+                    }
+                }
+
+                if (success) {
+                    // Refrescar el directorio actual
+                    loadDirectory(destinationPath)
+                } else {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(getApplication(), "Error al pegar el archivo", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: IOException) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(getApplication(), "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            } finally {
+                // Limpiar el portapapeles solo si fue una acción de MOVER
+                if (action == ClipboardAction.MOVE) {
+                    withContext(Dispatchers.Main) {
+                        clearClipboard()
+                    }
+                }
+            }
+        }
+    }
+
+
+    // --- Funciones de operaciones de archivo ---
 
     fun addToFavorites(file: File) {
         // TODO: Lógica para SharedPreferences o Room
-        // val prefs = getApplication<Application>().getSharedPreferences("favorites", Context.MODE_PRIVATE)
-        // prefs.edit().putBoolean(file.path, true).apply()
     }
 
     fun addRecentFile(file: File) {
         // TODO: Lógica para Room
-        // val recentFile = RecentFileEntity(path = file.path, timestamp = System.currentTimeMillis())
-        // recentFileRepository.insert(recentFile)
     }
 
-    // --- Funciones de operaciones de archivo (Conceptuales) ---
-
+    /**
+     * Borra un archivo o directorio recursivamente.
+     */
     fun deleteFile(file: File) {
         if (_permissionsGranted.value != true) {
             Log.w("DeleteFile", "Permiso denegado para borrar.")
@@ -133,11 +217,10 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                var success = false
-                if (file.isDirectory) {
-                    success = file.deleteRecursively()
+                val success = if (file.isDirectory) {
+                    file.deleteRecursively()
                 } else {
-                    success = file.delete()
+                    file.delete()
                 }
 
                 if (success) {
@@ -146,7 +229,6 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
                     loadDirectory(_currentPath.value ?: initialPath)
                 } else {
                     Log.e("DeleteFile", "No se pudo borrar el archivo: ${file.path}")
-                    // TODO: Mostrar error al usuario (p.ej. con un Snackbar)
                 }
             } catch (e: Exception) {
                 Log.e("DeleteFile", "Error borrando archivo: ${file.path}", e)
@@ -154,23 +236,24 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Renombra un archivo o directorio.
+     */
     fun renameFile(file: File, newName: String) {
         if (_permissionsGranted.value != true) {
             Log.w("RenameFile", "Permiso denegado para renombrar.")
             return
         }
 
-        // Validación simple
         if (newName.isBlank()) {
             Log.w("RenameFile", "El nuevo nombre está vacío.")
-            // TODO: Mostrar un Toast/Error al usuario
+            Toast.makeText(getApplication(), "El nombre no puede estar vacío", Toast.LENGTH_SHORT).show()
             return
         }
 
         viewModelScope.launch(Dispatchers.IO) {
             val newFile = File(file.parent, newName)
 
-            // Comprobar si el nuevo nombre ya existe
             if (newFile.exists()) {
                 Log.e("RenameFile", "Un archivo con ese nombre ya existe.")
                 withContext(Dispatchers.Main) {
@@ -183,7 +266,7 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
                 val success = file.renameTo(newFile)
                 if (success) {
                     Log.i("RenameFile", "Archivo renombrado a: ${newFile.path}")
-                    // Recargar el directorio para reflejar el cambio
+                    // Recargar el directorio
                     loadDirectory(_currentPath.value ?: initialPath)
                 } else {
                     Log.e("RenameFile", "No se pudo renombrar el archivo: ${file.path}")
@@ -202,7 +285,6 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Prepara un Intent para COMPARTIR un archivo.
-     * Es similar a openFile, pero usa ACTION_SEND.
      */
     fun shareFile(context: Context, file: File) {
         if (!file.canRead()) {
@@ -221,9 +303,8 @@ class FileViewModel(application: Application) : AndroidViewModel(application) {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
 
-            // Usamos un chooser para que se muestre el diálogo de "Compartir con..."
             val chooserIntent = Intent.createChooser(intent, "Compartir archivo con...")
-            chooserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) // Necesario si se llama desde fuera de una Activity
+            chooserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
             context.startActivity(chooserIntent)
 
