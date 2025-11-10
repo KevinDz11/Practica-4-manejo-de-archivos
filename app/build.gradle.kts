@@ -63,4 +63,5 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.coil.compose)
     implementation(libs.androidx.datastore.preferences)
+    implementation("me.saket.telephoto:zoomable-image-coil:1.2.0")
 }
